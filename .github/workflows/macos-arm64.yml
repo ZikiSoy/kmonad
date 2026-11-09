@@ -17,7 +17,7 @@ permissions:
 jobs:
   build:
     name: macOS arm64 (dext)
-    runs-on: macos-14   # Apple Silicon (M1) runner
+    runs-on: macos-latest   # Apple Silicon (arm64) runner
 
     steps:
       - name: Clone project (with Karabiner submodules)
@@ -60,6 +60,7 @@ jobs:
         shell: bash
         run: |
           file dist/kmonad
+          lipo -archs dist/kmonad | grep -q arm64
           dist/kmonad --version || true
 
       - name: Package
