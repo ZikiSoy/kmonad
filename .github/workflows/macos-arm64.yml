@@ -1,7 +1,17 @@
 name: macOS Apple Silicon build
 
 # Builds kmonad for Apple Silicon Macs (M1 and later) against the
-# Karabiner DriverKit VirtualHIDDevice (dext), and uploads the binary.
+# Karabiner DriverKit VirtualHIDDevice (dext).
+#
+# The dext client is compiled into kmonad and its IPC protocol must match the
+# installed VirtualHIDDevice daemon, so one binary is built per protocol:
+#
+#   VirtualHIDDevice 6.x -> client protocol 5 -> kmonad-p5
+#   VirtualHIDDevice 7.x -> client protocol 6 -> kmonad-p6
+#   VirtualHIDDevice 8.x -> client protocol 7 -> kmonad-p7
+#
+# The bundle also ships `kmonad`, a launcher that reads the installed
+# VirtualHIDDevice version and execs the matching binary.
 # Pushing a tag like v0.4.x-mac also publishes it as a GitHub release.
 
 on:
@@ -16,8 +26,18 @@ permissions:
 
 jobs:
   build:
-    name: macOS arm64 (dext)
+    name: macOS arm64 dext (protocol ${{ matrix.protocol }})
     runs-on: macos-latest   # Apple Silicon (arm64) runner
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - protocol: 5
+            vhid: v6.14.0
+          - protocol: 6
+            vhid: v7.3.0
+          - protocol: 7
+            vhid: v8.5.0
 
     steps:
       - name: Clone project (with Karabiner submodules)
@@ -25,13 +45,21 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Use VirtualHIDDevice ${{ matrix.vhid }}
+        shell: bash
+        run: |
+          cd c_src/mac/Karabiner-DriverKit-VirtualHIDDevice
+          git fetch --depth 1 origin "refs/tags/${{ matrix.vhid }}:refs/tags/${{ matrix.vhid }}"
+          git checkout -q "${{ matrix.vhid }}"
+          grep -q "embedded_client_protocol_version(${{ matrix.protocol }})" \
+            include/pqrs/karabiner/driverkit/client_protocol_version.hpp
+
       - name: Read resolver and GHC version
         id: ghc-version
         shell: bash
         run: |
           RESOLVER=$(awk '/^resolver:/ {print $2}' stack.yaml)
           GHCVER=$(curl -fsSL "https://www.stackage.org/${RESOLVER}/ghc-major-version")
-          echo "resolver=$RESOLVER" >> "$GITHUB_OUTPUT"
           echo "ghc=$GHCVER" >> "$GITHUB_OUTPUT"
           echo "Resolver $RESOLVER -> GHC $GHCVER"
 
@@ -61,31 +89,51 @@ jobs:
         run: |
           file dist/kmonad
           lipo -archs dist/kmonad | grep -q arm64
-          dist/kmonad --version || true
+          mv dist/kmonad "dist/kmonad-p${{ matrix.protocol }}"
 
-      - name: Package
-        id: pkg
-        shell: bash
-        run: |
-          NAME="kmonad-macos-arm64-dext"
-          cp dist/kmonad "$NAME"
-          chmod +x "$NAME"
-          tar -czf "$NAME.tar.gz" "$NAME"
-          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifact
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.name }}
+          name: kmonad-p${{ matrix.protocol }}
+          path: dist/kmonad-p${{ matrix.protocol }}
+
+  bundle:
+    name: Bundle with launcher
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kmonad-p*
+          path: bin
+          merge-multiple: true
+
+      - name: Package
+        shell: bash
+        run: |
+          NAME=kmonad-macos-arm64-dext
+          mkdir "$NAME"
+          cp bin/kmonad-p* "$NAME/"
+          cp ci/macos/kmonad-launcher.sh "$NAME/kmonad"
+          chmod 755 "$NAME"/*
+          ls -l "$NAME"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmonad-macos-arm64-dext
           path: |
-            ${{ steps.pkg.outputs.name }}.tar.gz
-            ${{ steps.pkg.outputs.name }}.tar.gz.sha256
+            kmonad-macos-arm64-dext.tar.gz
+            kmonad-macos-arm64-dext.tar.gz.sha256
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.pkg.outputs.name }}.tar.gz
-            ${{ steps.pkg.outputs.name }}.tar.gz.sha256
+            kmonad-macos-arm64-dext.tar.gz
+            kmonad-macos-arm64-dext.tar.gz.sha256
