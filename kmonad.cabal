@@ -154,7 +154,7 @@ library
       cxx-sources:
         c_src/mac/dext.cpp
       cxx-options:
-        -std=c++2a
+        -std=c++20
       include-dirs:
         c_src/mac/Karabiner-DriverKit-VirtualHIDDevice/include/pqrs/karabiner/driverkit
         c_src/mac/Karabiner-DriverKit-VirtualHIDDevice/vendor/vendor/include
