@@ -83,7 +83,12 @@ start_instance() {
   local n="$1" cfg="$2" lf="$LOG_DIR/${1%.kbd}.log"
   rotate "$lf"
   echo "==== $(date '+%Y-%m-%d %H:%M:%S') starting $cfg" >> "$lf"
-  "$APP_BIN/kmonad" "$cfg" >> "$lf" 2>&1 &
+  if [ -x "$APP_BIN/kmonad-disclaim" ]; then
+    # own TCC identity, so Input Monitoring is checked against kmonad itself
+    "$APP_BIN/kmonad-disclaim" "$APP_BIN/kmonad" "$cfg" >> "$lf" 2>&1 &
+  else
+    "$APP_BIN/kmonad" "$cfg" >> "$lf" 2>&1 &
+  fi
   local pid=$!
   put "$n" "$pid" pid
   put "$n" "$(date +%s)" started
