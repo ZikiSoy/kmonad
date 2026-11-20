@@ -1,9 +1,10 @@
 name: Haskell CI - Stack based
 # note: for the most part, shamelessly stolen from xmonad
 
+# Fork (ZikiSoy/kmonad): upstream CI only on demand, so pushes don't queue
+# a dozen jobs in front of the macOS build.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:

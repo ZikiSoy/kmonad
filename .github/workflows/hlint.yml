@@ -1,9 +1,10 @@
 # Source: https://github.com/xmonad/xmonad-contrib/blob/e2ffa533da76e6375179eff942bb0647dd22fb58/.github/workflows/hlint.yaml
 name: hlint
 
+# Fork (ZikiSoy/kmonad): upstream CI only on demand, so pushes don't queue
+# a dozen jobs in front of the macOS build.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   hlint:
