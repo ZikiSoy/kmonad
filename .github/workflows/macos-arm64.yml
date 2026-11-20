@@ -27,6 +27,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: macOS arm64 dext (protocol ${{ matrix.protocol }})
@@ -180,6 +184,7 @@ jobs:
 
       - name: Smoke test - install on this runner
         shell: bash
+        timeout-minutes: 10
         run: |
           sudo installer -pkg "$PKG" -target /
           sleep 8

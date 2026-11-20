@@ -15,7 +15,10 @@ chmod 755 "/Library/Application Support/KMonad" /Library/Logs/KMonad
 if [ ! -f "$VHID_INFO" ] && [ -f "$HERE/Karabiner-DriverKit-VirtualHIDDevice.pkg" ]; then
   installer -pkg "$HERE/Karabiner-DriverKit-VirtualHIDDevice.pkg" -target / || true
   if [ -n "$USER_ID" ] && [ "$USER_NAME" != root ]; then
-    launchctl asuser "$USER_ID" /Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate || true
+    # activate waits for the user to approve the system extension in
+    # System Settings; don't block the installer on it.
+    ( launchctl asuser "$USER_ID" /Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate \
+        >/Library/Logs/KMonad/vhid-activate.log 2>&1 & )
   fi
 fi
 
@@ -39,6 +42,6 @@ launchctl bootstrap system "/Library/LaunchDaemons/$LABEL.plist" || launchctl ki
 
 # Start the menu bar app for the logged-in user
 if [ -n "$USER_ID" ] && [ "$USER_NAME" != root ]; then
-  launchctl asuser "$USER_ID" sudo -u "$USER_NAME" /usr/bin/open "$APP" || true
+  ( launchctl asuser "$USER_ID" sudo -u "$USER_NAME" /usr/bin/open -g "$APP" >/dev/null 2>&1 & )
 fi
 exit 0
