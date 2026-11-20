@@ -33,6 +33,39 @@ struct Status: Decodable {
     let keyboards: [KeyboardStatus]
 }
 
+// The "K" of the KMonad logo (kmonad.svg, CC-BY-SA 4.0 by 6gk), in SVG units
+// (11.32 x 15.53, y pointing down).
+let kGlyphSize = NSSize(width: 11.32044, height: 15.527696)
+func kGlyphPath(in rect: NSRect) -> NSBezierPath {
+    let s = min(rect.width / kGlyphSize.width, rect.height / kGlyphSize.height)
+    let ox = rect.midX - kGlyphSize.width * s / 2
+    let oy = rect.midY - kGlyphSize.height * s / 2
+    func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: ox + x * s, y: oy + (kGlyphSize.height - y) * s) }
+    let path = NSBezierPath()
+    // vertical bar
+    path.move(to: p(0, 0.05287657)); path.line(to: p(3.2150437, 0.05287657))
+    path.line(to: p(3.2150437, 15.527696)); path.line(to: p(0, 15.527696)); path.close()
+    // chevron
+    path.move(to: p(2.3628634, 7.8096536)); path.line(to: p(7.4468934, 0.0335088))
+    path.line(to: p(11.32044, 0.0335088)); path.line(to: p(6.2170423, 7.780602))
+    path.line(to: p(11.301072, 15.527696)); path.line(to: p(7.4565772, 15.527696)); path.close()
+    return path
+}
+
+func statusIcon(alert: Bool) -> NSImage {
+    let size = NSSize(width: alert ? 20 : 14, height: 18)
+    let image = NSImage(size: size, flipped: false) { _ in
+        NSColor.black.setFill()
+        kGlyphPath(in: NSRect(x: 1, y: 2, width: 11, height: 14)).fill()
+        if alert {
+            NSBezierPath(ovalIn: NSRect(x: 13.5, y: 1.5, width: 5.5, height: 5.5)).fill()
+        }
+        return true
+    }
+    image.isTemplate = true
+    return image
+}
+
 let stateDir = URL(fileURLWithPath: "/Library/Application Support/KMonad")
 let logDir = URL(fileURLWithPath: "/Library/Logs/KMonad")
 let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -85,12 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bad = !fresh || (status?.keyboards.contains {
             ["needs-permission", "config-error", "no-driver", "restarting", "missing"].contains($0.state)
         } ?? false) || status?.vhid.state == "missing"
-        let name = bad ? "exclamationmark.triangle" : "keyboard"
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "KMonad")
-            ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "KMonad")
-        image?.isTemplate = true
-        statusItem.button?.image = image
-        if image == nil { statusItem.button?.title = "KM" }
+        statusItem.button?.image = statusIcon(alert: bad)
         statusItem.button?.toolTip = bad ? "KMonad: needs attention" : "KMonad"
     }
 
@@ -106,6 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: "KMonad", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if status?.keyboards.contains(where: { $0.state == "needs-permission" }) == true {
+            menu.addItem(action("⚠︎ Grant Input Monitoring…", #selector(requestInputMonitoring), nil))
+        }
         if !fresh {
             menu.addItem(disabled("⚠︎ Background service is not running"))
             menu.addItem(disabled("   Reinstall KMonad.pkg to fix"))
@@ -159,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             menu.addItem(disabled("Driver: VirtualHIDDevice \(v.version.isEmpty ? "?" : v.version) · \(d)"))
         }
+        menu.addItem(action("Grant Input Monitoring…", #selector(requestInputMonitoring), nil))
         menu.addItem(action("Input Monitoring Settings…", #selector(openInputMonitoring), nil))
         menu.addItem(action("Show kmonad Binary in Finder", #selector(revealBinary), nil))
         menu.addItem(action("Supervisor Log", #selector(showSupervisorLog), nil))
@@ -296,15 +328,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc func revealBinary() {
-        // The binary that needs Input Monitoring is the one matching the driver.
+    let requestLabel = "io.github.zikisoy.kmonad.request-access"
+
+    /// Path of the kmonad binary that matches the installed driver.
+    func currentBinary() -> URL {
         let bin = Bundle.main.resourceURL!.appendingPathComponent("bin")
-        var file = bin.appendingPathComponent("kmonad")
-        if let v = readStatus()?.vhid.version, let major = Int(v.split(separator: ".").first ?? "") {
-            let proto = [6: 5, 7: 6, 8: 7][major]
-            if let p = proto { file = bin.appendingPathComponent("kmonad-p\(p)") }
+        if let v = readStatus()?.vhid.version, let major = Int(v.split(separator: ".").first ?? ""),
+           let p = [6: 5, 7: 6, 8: 7][major] {
+            return bin.appendingPathComponent("kmonad-p\(p)")
         }
-        NSWorkspace.shared.activateFileViewerSelecting([file])
+        return bin.appendingPathComponent("kmonad-p7")
+    }
+
+    /// Runs the kmonad binary once as a launchd job in the user's GUI session,
+    /// so it is its own responsible process and macOS shows the Input
+    /// Monitoring prompt for *kmonad* (kmonad calls IOHIDRequestAccess when
+    /// KMONAD_REQUEST_ACCESS_ONLY is set, then exits).
+    @objc func requestInputMonitoring() {
+        let uid = getuid()
+        let domain = "gui/\(uid)"
+        let plistURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(requestLabel).plist")
+        let template = Bundle.main.url(forResource: "template", withExtension: "kbd")!.path
+        let job: [String: Any] = [
+            "Label": requestLabel,
+            "ProgramArguments": [currentBinary().path, template],
+            "EnvironmentVariables": ["KMONAD_REQUEST_ACCESS_ONLY": "1"],
+            "RunAtLoad": true,
+            "ProcessType": "Interactive",
+            "StandardErrorPath": FileManager.default.temporaryDirectory.appendingPathComponent("kmonad-request-access.log").path,
+        ]
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0),
+              (try? data.write(to: plistURL)) != nil else { return }
+        runWait("/bin/launchctl", ["bootout", "\(domain)/\(requestLabel)"])
+        runWait("/bin/launchctl", ["bootstrap", domain, plistURL.path])
+
+        // Once the user has decided, clean up and restart the keyboards.
+        var tries = 0
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            tries += 1
+            let running = self.runWait("/bin/launchctl", ["print", "\(domain)/\(self.requestLabel)"])
+                .contains("state = running")
+            if !running || tries > 100 {
+                t.invalidate()
+                self.runWait("/bin/launchctl", ["bootout", "\(domain)/\(self.requestLabel)"])
+                try? FileManager.default.removeItem(at: plistURL)
+                self.touch(self.reloadURL)
+            }
+        }
+    }
+
+    @discardableResult
+    func runWait(_ path: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        guard (try? p.run()) != nil else { return "" }
+        let out = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: out, encoding: .utf8) ?? ""
+    }
+
+    @objc func revealBinary() {
+        NSWorkspace.shared.activateFileViewerSelecting([currentBinary()])
     }
 
     @objc func toggleLogin() {

@@ -133,6 +133,8 @@ jobs:
           mkdir -p "$A/MacOS" "$A/Resources/bin/shims"
           swiftc -O -target arm64-apple-macos13.0 -parse-as-library \
             ci/macos/app/KMonadMenu.swift -o "$A/MacOS/KMonad"
+          swift ci/macos/app/make-icon.swift build/AppIcon.iconset
+          iconutil -c icns build/AppIcon.iconset -o "$A/Resources/AppIcon.icns"
           sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
             ci/macos/app/Info.plist > "$A/Info.plist"
           cp kbin/kmonad-p* "$A/Resources/bin/"
@@ -193,6 +195,7 @@ jobs:
           python3 -c "import json;d=json.load(open('/Library/Application Support/KMonad/status.json'));print('vhid:',d['vhid'])"
           ls -l /usr/local/bin/kmonad
           /usr/local/bin/kmonad -d /Applications/KMonad.app/Contents/Resources/template.kbd && echo "template parses"
+          KMONAD_REQUEST_ACCESS_ONLY=1 perl -e "alarm 20; exec @ARGV" /usr/local/bin/kmonad /Applications/KMonad.app/Contents/Resources/template.kbd; echo "request-access mode exit=$?"
           pgrep -lf KMonad.app || echo "(menu app not started: no GUI session on CI)"
           cat /Library/Logs/KMonad/supervisor.log
           sudo /Applications/KMonad.app/Contents/Resources/uninstall.sh
