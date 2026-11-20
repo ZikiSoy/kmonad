@@ -33,31 +33,23 @@ struct Status: Decodable {
     let keyboards: [KeyboardStatus]
 }
 
-// The "K" of the KMonad logo (kmonad.svg, CC-BY-SA 4.0 by 6gk), in SVG units
-// (11.32 x 15.53, y pointing down).
-let kGlyphSize = NSSize(width: 11.32044, height: 15.527696)
-func kGlyphPath(in rect: NSRect) -> NSBezierPath {
-    let s = min(rect.width / kGlyphSize.width, rect.height / kGlyphSize.height)
-    let ox = rect.midX - kGlyphSize.width * s / 2
-    let oy = rect.midY - kGlyphSize.height * s / 2
-    func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: ox + x * s, y: oy + (kGlyphSize.height - y) * s) }
-    let path = NSBezierPath()
-    // vertical bar
-    path.move(to: p(0, 0.05287657)); path.line(to: p(3.2150437, 0.05287657))
-    path.line(to: p(3.2150437, 15.527696)); path.line(to: p(0, 15.527696)); path.close()
-    // chevron
-    path.move(to: p(2.3628634, 7.8096536)); path.line(to: p(7.4468934, 0.0335088))
-    path.line(to: p(11.32044, 0.0335088)); path.line(to: p(6.2170423, 7.780602))
-    path.line(to: p(11.301072, 15.527696)); path.line(to: p(7.4565772, 15.527696)); path.close()
-    return path
-}
+// Menu bar icon: K.svg (the "K" of kmonad.svg, CC-BY-SA 4.0 by 6gk), used as
+// a template image so it follows the menu bar colour.
+let kSVG: NSImage? = Bundle.main.url(forResource: "K", withExtension: "svg")
+    .flatMap { NSImage(contentsOf: $0) }
 
 func statusIcon(alert: Bool) -> NSImage {
     let size = NSSize(width: alert ? 20 : 14, height: 18)
     let image = NSImage(size: size, flipped: false) { _ in
-        NSColor.black.setFill()
-        kGlyphPath(in: NSRect(x: 1, y: 2, width: 11, height: 14)).fill()
+        let k = NSRect(x: 1.5, y: 2, width: 14 * 11.32044 / 15.527696, height: 14)
+        if let svg = kSVG {
+            svg.draw(in: k)
+        } else {
+            ("K" as NSString).draw(at: NSPoint(x: 1, y: 1),
+                                   withAttributes: [.font: NSFont.boldSystemFont(ofSize: 14)])
+        }
         if alert {
+            NSColor.black.setFill()
             NSBezierPath(ovalIn: NSRect(x: 13.5, y: 1.5, width: 5.5, height: 5.5)).fill()
         }
         return true

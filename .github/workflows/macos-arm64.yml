@@ -133,7 +133,13 @@ jobs:
           mkdir -p "$A/MacOS" "$A/Resources/bin/shims"
           swiftc -O -target arm64-apple-macos13.0 -parse-as-library \
             ci/macos/app/KMonadMenu.swift -o "$A/MacOS/KMonad"
-          swift ci/macos/app/make-icon.swift build/AppIcon.iconset
+          python3 ci/macos/app/extract-k.py kmonad.svg "$A/Resources/K.svg"
+          if ! swift ci/macos/app/make-icon.swift "$A/Resources/K.svg" build/AppIcon.iconset; then
+            # NSImage could not read the SVG: rasterise the same SVG instead
+            brew install librsvg
+            rsvg-convert -h 1024 "$A/Resources/K.svg" -o build/K.png
+            swift ci/macos/app/make-icon.swift build/K.png build/AppIcon.iconset
+          fi
           iconutil -c icns build/AppIcon.iconset -o "$A/Resources/AppIcon.icns"
           sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
             ci/macos/app/Info.plist > "$A/Info.plist"
