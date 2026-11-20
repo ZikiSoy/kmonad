@@ -1,0 +1,9 @@
+#!/bin/bash
+# Stop the old supervisor and earlier hand-made kmonad LaunchDaemons.
+for l in io.github.zikisoy.kmonad.supervisor local.kmonad.macbook org.pqrs.Karabiner-VirtualHIDDevice-Daemon.kmonad; do
+  launchctl bootout "system/$l" 2>/dev/null || true
+done
+rm -f /Library/LaunchDaemons/local.kmonad.macbook.plist \
+      /Library/LaunchDaemons/org.pqrs.Karabiner-VirtualHIDDevice-Daemon.kmonad.plist
+pkill -x KMonad 2>/dev/null || true
+exit 0

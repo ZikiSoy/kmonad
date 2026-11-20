@@ -1,0 +1,44 @@
+#!/bin/bash
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
+APP=/Applications/KMonad.app
+LABEL=io.github.zikisoy.kmonad.supervisor
+VHID_INFO=/Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/Info.plist
+USER_NAME=$(stat -f %Su /dev/console)
+USER_ID=$(id -u "$USER_NAME" 2>/dev/null || echo "")
+
+mkdir -p "/Library/Application Support/KMonad" /Library/Logs/KMonad
+chmod 755 "/Library/Application Support/KMonad" /Library/Logs/KMonad
+
+# Karabiner VirtualHIDDevice driver: install only when missing, so an existing
+# one (e.g. from Karabiner-Elements) is never replaced.
+if [ ! -f "$VHID_INFO" ] && [ -f "$HERE/Karabiner-DriverKit-VirtualHIDDevice.pkg" ]; then
+  installer -pkg "$HERE/Karabiner-DriverKit-VirtualHIDDevice.pkg" -target / || true
+  if [ -n "$USER_ID" ] && [ "$USER_NAME" != root ]; then
+    launchctl asuser "$USER_ID" /Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate || true
+  fi
+fi
+
+# CLI access
+mkdir -p /usr/local/bin
+ln -sf "$APP/Contents/Resources/bin/kmonad" /usr/local/bin/kmonad
+
+# User config folder + enabled list (empty: pick keyboards in the menu)
+if [ -n "$USER_ID" ] && [ "$USER_NAME" != root ]; then
+  HOME_DIR=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')
+  CFG="$HOME_DIR/.config/kmonad"
+  sudo -u "$USER_NAME" mkdir -p "$CFG"
+  if [ ! -f "$CFG/enabled" ]; then
+    printf '# Configs run by KMonad, one per line (managed by the KMonad menu)\n' | sudo -u "$USER_NAME" tee "$CFG/enabled" >/dev/null
+  fi
+fi
+
+# Boot-time supervisor (runs the keyboards, restarts them on errors)
+install -o root -g wheel -m 644 "$APP/Contents/Resources/$LABEL.plist" "/Library/LaunchDaemons/$LABEL.plist"
+launchctl bootstrap system "/Library/LaunchDaemons/$LABEL.plist" || launchctl kickstart -k "system/$LABEL"
+
+# Start the menu bar app for the logged-in user
+if [ -n "$USER_ID" ] && [ "$USER_NAME" != root ]; then
+  launchctl asuser "$USER_ID" sudo -u "$USER_NAME" /usr/bin/open "$APP" || true
+fi
+exit 0

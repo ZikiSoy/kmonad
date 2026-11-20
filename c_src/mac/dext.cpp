@@ -1,4 +1,5 @@
 #include <filesystem> // Include this before virtual_hid_device_service.hpp to avoid compile error
+#include <cstdlib>
 
 #include "keyio_mac.hpp"
 
@@ -26,6 +27,20 @@ int init_sink() {
                                   std::cout << "connected" << std::endl;
                                   pqrs::karabiner::driverkit::virtual_hid_device_service::virtual_hid_keyboard_parameters parameters;
                                   parameters.set_country_code(pqrs::hid::country_code::us);
+                                  // Own VID/PID so the virtual keyboard is not mistaken for
+                                  // Karabiner-Elements' one (default 0x16c0:0x27db).
+                                  // 0x1209 is pid.codes; 0x0007 is in its testing range.
+                                  // Override with KMONAD_VHID_VENDOR_ID / KMONAD_VHID_PRODUCT_ID.
+                                  {
+                                      auto env_id = [](const char* name, unsigned long fallback) {
+                                          const char* v = std::getenv(name);
+                                          return v ? std::strtoul(v, nullptr, 0) : fallback;
+                                      };
+                                      parameters.set_vendor_id(pqrs::hid::vendor_id::value_t(
+                                          env_id("KMONAD_VHID_VENDOR_ID", 0x1209)));
+                                      parameters.set_product_id(pqrs::hid::product_id::value_t(
+                                          env_id("KMONAD_VHID_PRODUCT_ID", 0x0007)));
+                                  }
                                   copy->async_virtual_hid_keyboard_initialize(parameters);
                               });
     client->connect_failed.connect([](auto&& error_code) {

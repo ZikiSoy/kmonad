@@ -1,0 +1,36 @@
+;; KMonad config for one keyboard.
+;; 1. Set iokit-name to your keyboard's product name. List them with:
+;;      ioreg -r -c IOHIDKeyboard | grep '"Product"'
+;;    (MacBook built-in keyboard: "Apple Internal Keyboard / Trackpad")
+;; 2. Enable this file in the KMonad menu bar icon. Saving reloads it.
+;; Docs: https://github.com/kmonad/kmonad/blob/master/keymap/tutorial.kbd
+
+(defcfg
+  input  (iokit-name "CHANGE ME")
+  output (kext)
+  fallthrough true
+  allow-cmd true
+)
+
+(defsrc
+  grv  1    2    3    4    5    6    7    8    9    0    -    =    bspc
+  tab  q    w    e    r    t    y    u    i    o    p    [    ]    \
+  caps a    s    d    f    g    h    j    k    l    ;    '    ret
+  lsft z    x    c    v    b    n    m    ,    .    /    rsft
+  lctl lalt lmet           spc            rmet ralt
+)
+
+(defalias
+  ;; caps: esc on tap, ctrl on hold
+  cesc (tap-hold-next-release 200 esc lctl)
+  ;; example app launcher (runs in your desktop session)
+  ;; chrm (cmd-button "open -a 'Google Chrome.app'")
+)
+
+(deflayer base
+  _    _    _    _    _    _    _    _    _    _    _    _    _    _
+  _    _    _    _    _    _    _    _    _    _    _    _    _    _
+  @cesc _   _    _    _    _    _    _    _    _    _    _    _
+  _    _    _    _    _    _    _    _    _    _    _    _
+  _    _    _              _              _    _
+)

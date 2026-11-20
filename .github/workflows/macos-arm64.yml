@@ -12,7 +12,10 @@ name: macOS Apple Silicon build
 #
 # The bundle also ships `kmonad`, a launcher that reads the installed
 # VirtualHIDDevice version and execs the matching binary.
-# Pushing a tag like v0.4.x-mac also publishes it as a GitHub release.
+# The `app` job packs everything into KMonad.app (menu bar app + root
+# supervisor LaunchDaemon) and a KMonad-<version>.pkg installer, then
+# installs/uninstalls it on the runner as a smoke test.
+# Pushing a tag like v0.4.x-mac also publishes the .pkg as a GitHub release.
 
 on:
   push:
@@ -97,43 +100,111 @@ jobs:
           name: kmonad-p${{ matrix.protocol }}
           path: dist/kmonad-p${{ matrix.protocol }}
 
-  bundle:
-    name: Bundle with launcher
+  app:
+    name: KMonad.app + installer
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    env:
+      VHID_VERSION: v8.5.0
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
           pattern: kmonad-p*
-          path: bin
+          path: kbin
           merge-multiple: true
 
-      - name: Package
+      - name: Version
+        id: v
         shell: bash
         run: |
-          NAME=kmonad-macos-arm64-dext
-          mkdir "$NAME"
-          cp bin/kmonad-p* "$NAME/"
-          cp ci/macos/kmonad-launcher.sh "$NAME/kmonad"
-          chmod 755 "$NAME"/*
-          ls -l "$NAME"
-          tar -czf "$NAME.tar.gz" "$NAME"
-          sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.4.5-zk.${GITHUB_RUN_NUMBER}"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: Upload bundle
+      - name: Build menu bar app
+        shell: bash
+        run: |
+          A=build/KMonad.app/Contents
+          mkdir -p "$A/MacOS" "$A/Resources/bin/shims"
+          swiftc -O -target arm64-apple-macos13.0 -parse-as-library \
+            ci/macos/app/KMonadMenu.swift -o "$A/MacOS/KMonad"
+          sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
+            ci/macos/app/Info.plist > "$A/Info.plist"
+          cp kbin/kmonad-p* "$A/Resources/bin/"
+          cp ci/macos/kmonad-launcher.sh "$A/Resources/bin/kmonad"
+          cp ci/macos/app/kmonad-supervisor "$A/Resources/bin/"
+          cp ci/macos/app/shims/open "$A/Resources/bin/shims/"
+          cp ci/macos/app/template.kbd ci/macos/app/uninstall.sh \
+             ci/macos/app/io.github.zikisoy.kmonad.supervisor.plist "$A/Resources/"
+          chmod 755 "$A/MacOS/KMonad" "$A/Resources/bin/"* "$A/Resources/bin/shims/open" "$A/Resources/uninstall.sh"
+          codesign --force --deep --sign - build/KMonad.app
+          codesign --verify --deep --verbose=2 build/KMonad.app
+          find build/KMonad.app -type f | sort
+
+      - name: Fetch Karabiner VirtualHIDDevice ${{ env.VHID_VERSION }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p pkgscripts
+          cp ci/macos/app/pkg-scripts/* pkgscripts/
+          URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice/releases/tags/$VHID_VERSION" \
+            | jq -r '.assets[] | select(.name | endswith(".pkg")) | .browser_download_url' | head -1)
+          echo "$URL"
+          curl -fsSL -o pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg "$URL"
+          pkgutil --check-signature pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg | tee sig.txt
+          grep -q "G43BCU2T37" sig.txt   # pqrs.org Developer ID
+
+      - name: Build installer
+        shell: bash
+        run: |
+          V=${{ steps.v.outputs.version }}
+          pkgbuild --root build --install-location /Applications \
+            --scripts pkgscripts --identifier io.github.zikisoy.kmonad \
+            --version "$V" --component-plist /dev/stdin component.pkg <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><array><dict>
+            <key>RootRelativeBundlePath</key><string>KMonad.app</string>
+            <key>BundleIsRelocatable</key><false/>
+            <key>BundleIsVersionChecked</key><false/>
+            <key>BundleHasStrictIdentifier</key><false/>
+            <key>BundleOverwriteAction</key><string>upgrade</string>
+          </dict></array></plist>
+          EOF
+          productbuild --package component.pkg "KMonad-$V.pkg"
+          shasum -a 256 "KMonad-$V.pkg" | tee "KMonad-$V.pkg.sha256"
+          echo "PKG=KMonad-$V.pkg" >> "$GITHUB_ENV"
+
+      - name: Smoke test - install on this runner
+        shell: bash
+        run: |
+          sudo installer -pkg "$PKG" -target /
+          sleep 8
+          sudo launchctl print system/io.github.zikisoy.kmonad.supervisor | grep -E "state|pid"
+          cat "/Library/Application Support/KMonad/status.json"
+          python3 -c "import json;d=json.load(open('/Library/Application Support/KMonad/status.json'));print('vhid:',d['vhid'])"
+          ls -l /usr/local/bin/kmonad
+          /usr/local/bin/kmonad -d /Applications/KMonad.app/Contents/Resources/template.kbd && echo "template parses"
+          pgrep -lf KMonad.app || echo "(menu app not started: no GUI session on CI)"
+          cat /Library/Logs/KMonad/supervisor.log
+          sudo /Applications/KMonad.app/Contents/Resources/uninstall.sh
+          test ! -e /Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: kmonad-macos-arm64-dext
+          name: KMonad-installer
           path: |
-            kmonad-macos-arm64-dext.tar.gz
-            kmonad-macos-arm64-dext.tar.gz.sha256
+            ${{ env.PKG }}
+            ${{ env.PKG }}.sha256
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            kmonad-macos-arm64-dext.tar.gz
-            kmonad-macos-arm64-dext.tar.gz.sha256
+            ${{ env.PKG }}
+            ${{ env.PKG }}.sha256

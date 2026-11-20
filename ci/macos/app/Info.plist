@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>io.github.zikisoy.kmonad</string>
+  <key>CFBundleName</key><string>KMonad</string>
+  <key>CFBundleDisplayName</key><string>KMonad</string>
+  <key>CFBundleExecutable</key><string>KMonad</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHumanReadableCopyright</key><string>KMonad: MIT. Karabiner-DriverKit-VirtualHIDDevice: Unlicense (pqrs.org).</string>
+</dict>
+</plist>

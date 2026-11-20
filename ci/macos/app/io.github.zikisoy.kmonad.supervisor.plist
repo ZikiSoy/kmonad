@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.github.zikisoy.kmonad.supervisor</string>
+  <key>ProgramArguments</key>
+  <array><string>/Applications/KMonad.app/Contents/Resources/bin/kmonad-supervisor</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>/Library/Logs/KMonad/supervisor.out</string>
+  <key>StandardErrorPath</key><string>/Library/Logs/KMonad/supervisor.out</string>
+</dict>
+</plist>
