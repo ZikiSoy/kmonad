@@ -39,9 +39,10 @@ let kSVG: NSImage? = Bundle.main.url(forResource: "K", withExtension: "svg")
     .flatMap { NSImage(contentsOf: $0) }
 
 func statusIcon(alert: Bool) -> NSImage {
-    let size = NSSize(width: alert ? 20 : 14, height: 18)
+    let kw = 14 * 16.46257 / 15.527696
+    let size = NSSize(width: (alert ? kw + 8 : kw + 3).rounded(.up), height: 18)
     let image = NSImage(size: size, flipped: false) { _ in
-        let k = NSRect(x: 1.5, y: 2, width: 14 * 11.32044 / 15.527696, height: 14)
+        let k = NSRect(x: 1.5, y: 2, width: kw, height: 14)
         if let svg = kSVG {
             svg.draw(in: k)
         } else {
@@ -50,7 +51,7 @@ func statusIcon(alert: Bool) -> NSImage {
         }
         if alert {
             NSColor.black.setFill()
-            NSBezierPath(ovalIn: NSRect(x: 13.5, y: 1.5, width: 5.5, height: 5.5)).fill()
+            NSBezierPath(ovalIn: NSRect(x: kw + 2, y: 1.5, width: 5.5, height: 5.5)).fill()
         }
         return true
     }

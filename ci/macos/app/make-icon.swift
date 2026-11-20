@@ -7,7 +7,7 @@ guard let k = NSImage(contentsOfFile: CommandLine.arguments[1]) else {
     FileHandle.standardError.write("cannot load \(CommandLine.arguments[1])\n".data(using: .utf8)!)
     exit(1)
 }
-let kAspect = 11.32044 / 15.527696
+let kAspect = k.size.width / k.size.height
 
 func render(_ px: Int) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px,
@@ -21,7 +21,7 @@ func render(_ px: Int) -> Data {
     let box = NSRect(x: inset, y: inset, width: S - 2 * inset, height: S - 2 * inset)
     NSColor.white.setFill()
     NSBezierPath(roundedRect: box, xRadius: box.width * 0.225, yRadius: box.width * 0.225).fill()
-    let h = box.height * 0.56, w = h * kAspect
+    let w = box.width * 0.62, h = w / kAspect
     k.draw(in: NSRect(x: box.midX - w / 2, y: box.midY - h / 2, width: w, height: h))
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
