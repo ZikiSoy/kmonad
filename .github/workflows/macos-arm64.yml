@@ -135,7 +135,6 @@ jobs:
             ci/macos/app/KMonadMenu.swift -o "$A/MacOS/KMonad"
           sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
             ci/macos/app/Info.plist > "$A/Info.plist"
-          clang -O2 -Wall -o "$A/Resources/bin/kmonad-disclaim" ci/macos/app/disclaim.c
           cp kbin/kmonad-p* "$A/Resources/bin/"
           cp ci/macos/kmonad-launcher.sh "$A/Resources/bin/kmonad"
           cp ci/macos/app/kmonad-supervisor "$A/Resources/bin/"
