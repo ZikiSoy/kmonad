@@ -59,6 +59,30 @@ func statusIcon(alert: Bool) -> NSImage {
     return image
 }
 
+// Background service. Two ways it can be installed:
+//  - .pkg: /Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist
+//  - drag-to-Applications (.dmg): the app registers the daemon bundled in
+//    Contents/Library/LaunchDaemons with SMAppService on first launch.
+let pkgDaemonPlist = "/Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist"
+let appDaemonPlistName = "io.github.zikisoy.kmonad.daemon.plist"
+var installedByPkg: Bool { FileManager.default.fileExists(atPath: pkgDaemonPlist) }
+let vhidManager = "/Applications/.Karabiner-VirtualHIDDevice-Manager.app"
+var driverInstalled: Bool { FileManager.default.fileExists(atPath: vhidManager) }
+
+@available(macOS 13.0, *)
+var appDaemon: SMAppService { SMAppService.daemon(plistName: appDaemonPlistName) }
+
+@available(macOS 13.0, *)
+func describe(_ s: SMAppService.Status) -> String {
+    switch s {
+    case .notRegistered: return "not registered"
+    case .enabled: return "enabled"
+    case .requiresApproval: return "requires approval"
+    case .notFound: return "not found"
+    @unknown default: return "unknown"
+    }
+}
+
 let stateDir = URL(fileURLWithPath: "/Library/Application Support/KMonad")
 let logDir = URL(fileURLWithPath: "/Library/Logs/KMonad")
 let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -96,11 +120,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.updateIcon() }
 
-        // First run: offer to start at login.
+        // First run: start the menu at login.
         if #available(macOS 13.0, *), !UserDefaults.standard.bool(forKey: "askedLoginItem") {
             UserDefaults.standard.set(true, forKey: "askedLoginItem")
             try? SMAppService.mainApp.register()
         }
+        if !FileManager.default.fileExists(atPath: enabledURL.path) { writeEnabled([]) }
+        DispatchQueue.main.async { self.setUpBackgroundService() }
+    }
+
+    /// Drag-to-Applications install: register the bundled daemon, ask for
+    /// approval, offer to install the Karabiner driver.
+    func setUpBackgroundService() {
+        guard !installedByPkg else { return }
+        guard Bundle.main.bundlePath.hasPrefix("/Applications/") else {
+            alert("Move KMonad to Applications",
+                  "Drag KMonad into the Applications folder and open it from there. "
+                  + "The keyboard service can only run from /Applications.")
+            NSApp.terminate(nil); return
+        }
+        if #available(macOS 13.0, *) {
+            let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+            // After an update, re-register so launchd picks up the new app.
+            if UserDefaults.standard.string(forKey: "daemonVersion") != version,
+               appDaemon.status == .enabled {
+                try? appDaemon.unregister()
+            }
+            if appDaemon.status != .enabled {
+                do { try appDaemon.register() } catch {
+                    NSLog("KMonad: daemon register: \(error)")
+                }
+            }
+            UserDefaults.standard.set(version, forKey: "daemonVersion")
+            if appDaemon.status == .requiresApproval {
+                if alert("Allow KMonad in the background",
+                         "KMonad needs its background service to remap your keyboards. "
+                         + "Turn on KMonad under Login Items & Extensions → Allow in the Background.",
+                         ok: "Open Settings") {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            } else if appDaemon.status != .enabled {
+                alert("Background service not available",
+                      "macOS refused to register KMonad's background service (\(describe(appDaemon.status))). "
+                      + "Install KMonad with the .pkg installer instead.")
+            }
+        }
+        if !driverInstalled { offerDriverInstall() }
+    }
+
+    func offerDriverInstall() {
+        guard let pkg = Bundle.main.url(forResource: "Karabiner-DriverKit-VirtualHIDDevice", withExtension: "pkg") else { return }
+        if alert("Install the Karabiner keyboard driver?",
+                 "KMonad sends keys through the Karabiner DriverKit VirtualHIDDevice driver, which is not installed. "
+                 + "The official installer (signed by pqrs.org) will open. Afterwards allow the system extension "
+                 + "in System Settings → Privacy & Security.", ok: "Install") {
+            run("/usr/bin/open", [pkg.path])
+        }
+    }
+
+    @objc func activateDriver() {
+        run("\(vhidManager)/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager", ["activate"])
+    }
+
+    @objc func installDriver() { offerDriverInstall() }
+
+    @objc func enableService() {
+        if #available(macOS 13.0, *) {
+            if appDaemon.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems(); return }
+            do { try appDaemon.register() } catch {
+                alert("Could not register the background service", "\(error)")
+            }
+            if appDaemon.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        }
+    }
+
+    @objc func disableService() {
+        if #available(macOS 13.0, *) {
+            if alert("Turn off the keyboard service?",
+                     "KMonad stops remapping until you turn it on again. Do this before deleting the app.",
+                     ok: "Turn Off") {
+                try? appDaemon.unregister()
+            }
+        }
+    }
+
+    @discardableResult
+    func alert(_ title: String, _ text: String, ok: String = "OK") -> Bool {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.addButton(withTitle: ok)
+        if ok != "OK" { a.addButton(withTitle: "Cancel") }
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: icon
@@ -174,6 +286,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(action("New Config…", #selector(newConfig), nil, key: "n"))
 
         menu.addItem(.separator())
+        if installedByPkg {
+            menu.addItem(disabled("Background service: installed by .pkg"))
+        } else if #available(macOS 13.0, *) {
+            let st = appDaemon.status
+            if st == .enabled {
+                menu.addItem(disabled("Background service: on"))
+                menu.addItem(action("Turn Off Background Service…", #selector(disableService), nil))
+            } else {
+                menu.addItem(action("⚠︎ Turn On Background Service (\(describe(st)))…", #selector(enableService), nil))
+            }
+        }
+        if !driverInstalled {
+            menu.addItem(action("⚠︎ Install Karabiner Driver…", #selector(installDriver), nil))
+        } else if status?.vhid.state == "missing" {
+            menu.addItem(action("Activate Karabiner Driver", #selector(activateDriver), nil))
+        }
         if let v = status?.vhid {
             let d: String
             switch v.state {
@@ -402,6 +530,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 @main
 struct KMonadMenuApp {
     static func main() {
+        let args = CommandLine.arguments
+        if args.contains("--supervisor") {
+            // Started by launchd (SMAppService daemon): become the supervisor.
+            let script = Bundle.main.resourceURL!.appendingPathComponent("bin/kmonad-supervisor").path
+            let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/bash"), strdup(script), nil]
+            execv("/bin/bash", argv)
+            perror("execv"); exit(1)
+        }
+        if #available(macOS 13.0, *) {
+            if args.contains("--daemon-status") {
+                print("daemon:", describe(appDaemon.status)); exit(0)
+            }
+            if args.contains("--register-daemon") {
+                do { try appDaemon.register() } catch { print("register error:", error) }
+                print("daemon:", describe(appDaemon.status)); exit(0)
+            }
+            if args.contains("--unregister-daemon") {
+                do { try appDaemon.unregister() } catch { print("unregister error:", error) }
+                print("daemon:", describe(appDaemon.status)); exit(0)
+            }
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

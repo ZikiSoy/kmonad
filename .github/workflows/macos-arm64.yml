@@ -149,10 +149,9 @@ jobs:
           cp ci/macos/app/shims/open "$A/Resources/bin/shims/"
           cp ci/macos/app/template.kbd ci/macos/app/uninstall.sh \
              ci/macos/app/io.github.zikisoy.kmonad.supervisor.plist "$A/Resources/"
+          mkdir -p "$A/Library/LaunchDaemons"
+          cp ci/macos/app/io.github.zikisoy.kmonad.daemon.plist "$A/Library/LaunchDaemons/"
           chmod 755 "$A/MacOS/KMonad" "$A/Resources/bin/"* "$A/Resources/bin/shims/open" "$A/Resources/uninstall.sh"
-          codesign --force --deep --sign - build/KMonad.app
-          codesign --verify --deep --verbose=2 build/KMonad.app
-          find build/KMonad.app -type f | sort
 
       - name: Fetch Karabiner VirtualHIDDevice ${{ env.VHID_VERSION }}
         shell: bash
@@ -168,6 +167,15 @@ jobs:
           curl -fsSL -o pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg "$URL"
           pkgutil --check-signature pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg | tee sig.txt
           grep -q "G43BCU2T37" sig.txt   # pqrs.org Developer ID
+          # also inside the app, for drag-to-Applications installs
+          cp pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg build/KMonad.app/Contents/Resources/
+
+      - name: Sign app (ad hoc)
+        shell: bash
+        run: |
+          codesign --force --deep --sign - build/KMonad.app
+          codesign --verify --deep --verbose=2 build/KMonad.app
+          find build/KMonad.app -type f | sort
 
       - name: Build installer
         shell: bash
@@ -207,6 +215,34 @@ jobs:
           sudo /Applications/KMonad.app/Contents/Resources/uninstall.sh
           test ! -e /Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist
 
+      - name: Build disk image (drag to Applications)
+        shell: bash
+        run: |
+          V=${{ steps.v.outputs.version }}
+          mkdir -p dmgroot
+          cp -R build/KMonad.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "KMonad" -srcfolder dmgroot -ov -format UDZO "KMonad-$V.dmg"
+          shasum -a 256 "KMonad-$V.dmg" | tee "KMonad-$V.dmg.sha256"
+          echo "DMG=KMonad-$V.dmg" >> "$GITHUB_ENV"
+
+      - name: Smoke test - drag install + SMAppService daemon
+        shell: bash
+        timeout-minutes: 10
+        continue-on-error: true   # informational: unsigned daemons may be refused
+        run: |
+          MNT=$(hdiutil attach "$DMG" -nobrowse | awk -F'\t' '/Volumes/ {print $NF}')
+          cp -R "$MNT/KMonad.app" /Applications/
+          hdiutil detach "$MNT"
+          K=/Applications/KMonad.app/Contents/MacOS/KMonad
+          $K --daemon-status
+          $K --register-daemon
+          sleep 8
+          sudo launchctl print system/io.github.zikisoy.kmonad.daemon | grep -E "state|pid|program" || echo "(daemon not loaded)"
+          test -f "/Library/Application Support/KMonad/status.json" && cat "/Library/Application Support/KMonad/status.json"
+          $K --unregister-daemon
+          rm -rf /Applications/KMonad.app
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -214,6 +250,8 @@ jobs:
           path: |
             ${{ env.PKG }}
             ${{ env.PKG }}.sha256
+            ${{ env.DMG }}
+            ${{ env.DMG }}.sha256
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
@@ -222,3 +260,5 @@ jobs:
           files: |
             ${{ env.PKG }}
             ${{ env.PKG }}.sha256
+            ${{ env.DMG }}
+            ${{ env.DMG }}.sha256
