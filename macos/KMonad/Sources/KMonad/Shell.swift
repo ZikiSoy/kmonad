@@ -1,6 +1,7 @@
 import Foundation
 import IOKit
 import IOKit.hid
+import KMonadCore
 
 /// Runs a program to completion and returns its exit status and output.
 @discardableResult
@@ -98,4 +99,12 @@ var appVersion: String {
 var binDirectory: String {
     if let d = ProcessInfo.processInfo.environment["KMONAD_BIN_DIR"], !d.isEmpty { return d }
     return (Bundle.main.resourcePath ?? "/Applications/KMonad.app/Contents/Resources") + "/bin"
+}
+
+/// `stat` (follows symlinks) as a FileStamp; nil if the file is not there.
+func fileStamp(_ path: String) -> FileStamp? {
+    var st = stat()
+    guard stat(path, &st) == 0 else { return nil }
+    let mtime = Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9
+    return FileStamp(mtime: mtime, size: Int64(st.st_size), inode: UInt64(st.st_ino))
 }

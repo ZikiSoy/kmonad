@@ -56,12 +56,7 @@ final class RealEffects: SupervisorEffects {
         return ConsoleUser(name: name, uid: uid, home: String(cString: pw.pointee.pw_dir))
     }
 
-    func stat(_ path: String) -> FileStamp? {
-        var st = Darwin.stat()
-        guard Darwin.stat(path, &st) == 0 else { return nil }
-        let mtime = Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9
-        return FileStamp(mtime: mtime, size: Int64(st.st_size), inode: UInt64(st.st_ino))
-    }
+    func stat(_ path: String) -> FileStamp? { fileStamp(path) }
 
     func readAsUser(_ path: String, _ user: ConsoleUser) -> String? {
         if getuid() != 0 {
