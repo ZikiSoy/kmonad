@@ -264,12 +264,12 @@ public final class Supervisor {
 
     private func load(_ inst: Instance, path: String, user: ConsoleUser, proto: Int?) {
         guard let text = fx.readAsUser(path, user) else {
-            inst.pendingError = "无法读取 \(inst.name)"
+            inst.pendingError = "cannot read \(inst.name)"
             fx.log("\(inst.name): cannot read")
             return
         }
         guard let candidate = fx.writeCandidate(inst.name, text) else {
-            inst.pendingError = "无法保存配置快照"
+            inst.pendingError = "cannot save config snapshot"
             return
         }
         // Parsing is the same in every build, so any binary can check it.
@@ -287,7 +287,7 @@ public final class Supervisor {
             fx.log("\(inst.name): config loaded")
         } else {
             let lines = result.output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-            inst.pendingError = lines.last ?? "配置有误"
+            inst.pendingError = lines.last ?? "config error"
             fx.log("\(inst.name): config rejected: \(inst.pendingError ?? "")")
         }
     }
@@ -372,7 +372,7 @@ public final class Supervisor {
         } else {
             inst.failures += 1
             inst.state = .restarting
-            inst.message = "无法启动 kmonad"
+            inst.message = "cannot start kmonad"
             inst.nextStart = now.addingTimeInterval(30)
         }
     }

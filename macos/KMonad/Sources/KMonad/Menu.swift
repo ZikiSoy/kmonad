@@ -66,7 +66,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = topProblem(s) != nil
         statusItem.button?.image = Self.icon(alert: alert)
         statusItem.button?.appearsDisabled = s?.paused == true
-        statusItem.button?.toolTip = alert ? "KMonad: 需要处理" : "KMonad"
+        statusItem.button?.toolTip = alert ? "KMonad: needs attention" : "KMonad"
     }
 
     static let kImage: NSImage? = {
@@ -111,7 +111,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let configs = listConfigs()
         if configs.isEmpty {
-            menu.addItem(disabled("~/.config/kmonad 里还没有 .kbd 配置"))
+            menu.addItem(disabled("No .kbd configs in ~/.config/kmonad yet"))
         }
         for file in configs {
             let on = enabled.contains(file)
@@ -119,10 +119,10 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let item = NSMenuItem(title: title(file: file, on: on, status: k, paused: s?.paused == true),
                                   action: nil, keyEquivalent: "")
             let sub = NSMenu()
-            sub.addItem(action("启用", #selector(toggleEnabled(_:)), file, state: on))
-            sub.addItem(action("编辑", #selector(editConfig(_:)), file))
-            sub.addItem(action("显示日志", #selector(showLog(_:)), file))
-            sub.addItem(action("在 Finder 中显示", #selector(revealConfig(_:)), file))
+            sub.addItem(action("Enabled", #selector(toggleEnabled(_:)), file, state: on))
+            sub.addItem(action("Edit…", #selector(editConfig(_:)), file))
+            sub.addItem(action("Show Log", #selector(showLog(_:)), file))
+            sub.addItem(action("Show in Finder", #selector(revealConfig(_:)), file))
             if let k = k, on, !k.message.isEmpty {
                 sub.addItem(.separator())
                 sub.addItem(disabled(String(k.message.prefix(100))))
@@ -131,49 +131,49 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
         for k in (s?.keyboards ?? []) where k.state == .invalidName {
-            menu.addItem(disabled("⚠︎ enabled 里的无效条目：\(k.file)"))
+            menu.addItem(disabled("⚠︎ Invalid entry in enabled: \(k.file)"))
         }
 
         menu.addItem(.separator())
         let paused = s?.paused == true || FileManager.default.fileExists(atPath: pausedPath)
-        menu.addItem(action(paused ? "恢复改键" : "暂停改键", #selector(togglePause), nil, key: "p"))
-        menu.addItem(action("重新加载", #selector(reloadAll), nil, key: "r"))
-        let newItem = NSMenuItem(title: "新建配置", action: nil, keyEquivalent: "")
+        menu.addItem(action(paused ? "Resume Remapping" : "Pause Remapping", #selector(togglePause), nil, key: "p"))
+        menu.addItem(action("Reload", #selector(reloadAll), nil, key: "r"))
+        let newItem = NSMenuItem(title: "New Config for Keyboard", action: nil, keyEquivalent: "")
         let newMenu = NSMenu()
         let keyboards = connectedKeyboardNames()
-        if keyboards.isEmpty { newMenu.addItem(disabled("没有检测到键盘")) }
+        if keyboards.isEmpty { newMenu.addItem(disabled("No keyboards detected")) }
         for name in keyboards {
             newMenu.addItem(action(name.replacingOccurrences(of: "\n", with: " "), #selector(newConfig(_:)), name))
         }
         newItem.submenu = newMenu
         menu.addItem(newItem)
-        menu.addItem(action("打开配置文件夹", #selector(openConfigFolder), nil, key: "o"))
+        menu.addItem(action("Open Config Folder", #selector(openConfigFolder), nil, key: "o"))
 
         menu.addItem(.separator())
         if let d = s?.driver {
             let daemon: String
             switch d.daemon {
-            case .ours: daemon = "守护进程由 KMonad 运行"
-            case .external: daemon = "守护进程由 Karabiner-Elements 运行"
-            case .none: daemon = "守护进程未运行"
+            case .ours: daemon = "Virtual keyboard daemon: run by KMonad"
+            case .external: daemon = "Virtual keyboard daemon: run by Karabiner-Elements"
+            case .none: daemon = "Virtual keyboard daemon: not running"
             }
-            let v = d.version.map { "驱动 \($0)" } ?? "驱动未安装"
+            let v = d.version.map { "Driver \($0)" } ?? "Driver not installed"
             menu.addItem(disabled("\(v) · \(daemon)"))
         }
-        menu.addItem(action("输入监控设置…", #selector(openInputMonitoring), nil))
-        menu.addItem(action("后台日志", #selector(showDaemonLog), nil))
+        menu.addItem(action("Input Monitoring Settings…", #selector(openInputMonitoring), nil))
+        menu.addItem(action("Service Log", #selector(showDaemonLog), nil))
         menu.addItem(.separator())
-        menu.addItem(action("登录时打开菜单", #selector(toggleLoginItem), nil,
+        menu.addItem(action("Show Menu at Login", #selector(toggleLoginItem), nil,
                             state: SMAppService.mainApp.status == .enabled))
-        menu.addItem(action("卸载 KMonad…", #selector(uninstall), nil))
-        menu.addItem(disabled("版本 \(appVersion)"))
-        menu.addItem(action("退出菜单（改键继续生效）", #selector(quit), nil, key: "q"))
+        menu.addItem(action("Uninstall KMonad…", #selector(uninstall), nil))
+        menu.addItem(disabled("Version \(appVersion)"))
+        menu.addItem(action("Quit Menu (remapping keeps running)", #selector(quit), nil, key: "q"))
     }
 
     func title(file: String, on: Bool, status k: KeyboardStatus?, paused: Bool) -> String {
-        guard on else { return "   \(file) — 未启用" }
-        guard let k = k else { return "○ \(file) — 启动中" }
-        let device = k.allKeyboards ? "所有键盘" : (k.device ?? "")
+        guard on else { return "   \(file) — off" }
+        guard let k = k else { return "○ \(file) — starting" }
+        let device = k.allKeyboards ? "all keyboards" : (k.device ?? "")
         let (dot, text) = label(k)
         let d = device.isEmpty ? "" : "  \(device.replacingOccurrences(of: "\n", with: " "))"
         return "\(dot) \(file)\(d) — \(text)"
@@ -181,35 +181,35 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func label(_ k: KeyboardStatus) -> (String, String) {
         switch k.state {
-        case .starting: return ("○", "启动中")
-        case .running: return k.connected ? ("●", "运行中") : ("○", "等待键盘连接")
-        case .paused: return ("○", "已暂停")
-        case .waitingDriver: return ("○", "等待虚拟键盘")
-        case .driverNotInstalled: return ("⚠︎", "驱动未安装")
-        case .driverNotActivated: return ("⚠︎", "驱动待批准")
-        case .driverUnsupported: return ("⚠︎", "驱动版本不支持")
-        case .driverMismatch: return ("⚠︎", "驱动版本不匹配")
-        case .needsPermission: return ("⚠︎", "需要输入监控权限")
-        case .keyboardInUse: return ("⚠︎", "键盘被其他程序占用")
-        case .configError: return ("⚠︎", "配置有误")
-        case .configErrorOldRunning: return ("⚠︎", "新配置有误，旧配置仍在运行")
-        case .conflict: return ("⚠︎", "与 \(k.message) 指向同一块键盘")
-        case .restarting: return ("↻", "出错，正在重启")
-        case .missing: return ("⚠︎", "文件不存在")
-        case .invalidName: return ("⚠︎", "文件名无效")
+        case .starting: return ("○", "starting")
+        case .running: return k.connected ? ("●", "running") : ("○", "waiting for keyboard")
+        case .paused: return ("○", "paused")
+        case .waitingDriver: return ("○", "waiting for virtual keyboard")
+        case .driverNotInstalled: return ("⚠︎", "Driver not installed")
+        case .driverNotActivated: return ("⚠︎", "driver needs approval")
+        case .driverUnsupported: return ("⚠︎", "driver version unsupported")
+        case .driverMismatch: return ("⚠︎", "driver version mismatch")
+        case .needsPermission: return ("⚠︎", "needs Input Monitoring")
+        case .keyboardInUse: return ("⚠︎", "keyboard in use by another app")
+        case .configError: return ("⚠︎", "config error")
+        case .configErrorOldRunning: return ("⚠︎", "new config has errors; previous one still running")
+        case .conflict: return ("⚠︎", "same keyboard as \(k.message)")
+        case .restarting: return ("↻", "crashed, restarting")
+        case .missing: return ("⚠︎", "file missing")
+        case .invalidName: return ("⚠︎", "invalid file name")
         }
     }
 
     func problemItem(_ p: Problem) -> NSMenuItem {
         switch p {
-        case .serviceDown: return action("⚠︎ 后台没有运行 — 点此修复", #selector(fixService), nil)
-        case .driverMissing: return action("⚠︎ Karabiner 驱动未安装 — 点此安装", #selector(installDriver), nil)
-        case .driverNotActivated: return action("⚠︎ Karabiner 驱动待批准 — 点此处理", #selector(activateDriver), nil)
-        case .driverUnsupported(let v): return disabled("⚠︎ 驱动 \(v) 不受支持，请更新 KMonad")
-        case .needsPermission: return action("⚠︎ 需要输入监控权限 — 点此授权", #selector(grantPermission), nil)
-        case .configError(let f, _): return action("⚠︎ \(f) 配置有误 — 查看日志", #selector(showLog(_:)), f)
+        case .serviceDown: return action("⚠︎ Background service not running — Fix…", #selector(fixService), nil)
+        case .driverMissing: return action("⚠︎ Karabiner driver not installed — Install…", #selector(installDriver), nil)
+        case .driverNotActivated: return action("⚠︎ Karabiner driver needs approval — Approve…", #selector(activateDriver), nil)
+        case .driverUnsupported(let v): return disabled("⚠︎ Driver \(v) is not supported — update KMonad")
+        case .needsPermission: return action("⚠︎ Input Monitoring needed — Grant…", #selector(grantPermission), nil)
+        case .configError(let f, _): return action("⚠︎ \(f) has a config error — Show Log", #selector(showLog(_:)), f)
         case .keyboardInUse(let f):
-            return action("⚠︎ \(f) 的键盘被占用（在 Karabiner-Elements 的 Devices 里取消勾选）",
+            return action("⚠︎ \(f): keyboard in use (untick it in Karabiner-Elements → Devices)",
                           #selector(showLog(_:)), f)
         }
     }
@@ -325,7 +325,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Input Monitoring: ask macOS for KMonad (the daemon is KMonad too); if
-    /// the daemon still cannot open the keyboard, guide to adding kmonad-pN.
+    /// the daemon still cannot open the keyboard, guide to re-toggling it.
     @objc func grantPermission() {
         let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
         if access == kIOHIDAccessTypeGranted {
@@ -340,7 +340,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
         } else {
             openInputMonitoring()
-            alert("在「输入监控」里打开 KMonad", "KMonad 之前被拒绝过。请在打开的设置页里把 KMonad 的开关打开。")
+            alert("Turn on KMonad in Input Monitoring", "KMonad was denied before. Switch KMonad on in the Settings page that just opened.")
         }
         permissionPoll?.invalidate()
         var tries = 0
@@ -367,23 +367,16 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func fallbackPermissionGuide() {
-        let bin = currentBinary()
         openInputMonitoring()
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: bin)])
-        alert("把 \((bin as NSString).lastPathComponent) 加入「输入监控」",
-              "macOS 检查的是 kmonad 本身。在「输入监控」里点 +，把 Finder 中选中的 "
-              + "\((bin as NSString).lastPathComponent) 拖进列表并打开开关；列表里已有旧的就先删掉。之后 KMonad 会自动重试。")
-    }
-
-    func currentBinary() -> String {
-        let proto = status?.driver.protocolVersion ?? 7
-        return binDirectory + "/kmonad-p\(proto)"
+        alert("Turn KMonad off and on in Input Monitoring",
+              "macOS still blocks keyboard access. In the Settings page that just opened, switch KMonad off and "
+              + "on again (or remove it and grant again). KMonad retries automatically.")
     }
 
     @objc func fixService() {
         let plist = "/Library/LaunchDaemons/\(daemonLabel).plist"
         guard FileManager.default.fileExists(atPath: plist) else {
-            alert("后台服务没有安装", "请重新安装 KMonad 的 pkg 安装包。")
+            alert("Background service not installed", "Please reinstall the KMonad .pkg.")
             return
         }
         let script = "launchctl enable system/\(daemonLabel); launchctl bootstrap system \(plist) 2>/dev/null"
@@ -391,8 +384,8 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard runAsAdmin(script) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
             guard let self = self, !self.isFresh(self.status) else { return }
-            self.alert("后台仍然没有运行",
-                       "可能是在「登录项与扩展」里关掉了 KMonad 的「允许在后台」。请在打开的设置页里把它打开。")
+            self.alert("Background service still not running",
+                       "KMonad may be switched off under Login Items & Extensions → Allow in the Background. Turn it on in the Settings page that just opened.")
             SMAppService.openSystemSettingsLoginItems()
         }
     }
@@ -411,7 +404,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                   "x-apple.systempreferences:com.apple.preference.security"] {
             if let url = URL(string: u), NSWorkspace.shared.open(url) { break }
         }
-        alert("批准 Karabiner 驱动", "在「隐私与安全性」里找到来自 pqrs.org 的系统扩展，点「允许」。")
+        alert("Approve the Karabiner driver", "In Privacy & Security, find the system extension from pqrs.org and click Allow.")
     }
 
     @objc func toggleLoginItem() {
@@ -424,11 +417,11 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func uninstall() {
         let a = NSAlert()
-        a.messageText = "卸载 KMonad？"
-        a.informativeText = "会停止改键并删除 KMonad 和它的后台服务。~/.config/kmonad 里的配置会保留。"
-        a.addButton(withTitle: "卸载")
-        a.addButton(withTitle: "取消")
-        let removeDriver = NSButton(checkboxWithTitle: "同时删除 KMonad 安装的 Karabiner 驱动", target: nil, action: nil)
+        a.messageText = "Uninstall KMonad?"
+        a.informativeText = "This stops remapping and removes KMonad and its background service. Your configs in ~/.config/kmonad are kept."
+        a.addButton(withTitle: "Uninstall")
+        a.addButton(withTitle: "Cancel")
+        let removeDriver = NSButton(checkboxWithTitle: "Also remove the Karabiner driver installed by KMonad", target: nil, action: nil)
         let installedDriver = FileManager.default.fileExists(atPath: defaultStateDir + "/installed-driver")
         if installedDriver { a.accessoryView = removeDriver }
         NSApp.activate(ignoringOtherApps: true)
