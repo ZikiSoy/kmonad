@@ -444,8 +444,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openInputMonitoring() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
+        // macOS 13+ System Settings URL first, then the older one.
+        for u in ["x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent",
+                  "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"] {
+            if let url = URL(string: u), NSWorkspace.shared.open(url) { return }
         }
     }
 
@@ -483,6 +485,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         runWait("/bin/launchctl", ["bootout", "\(domain)/\(requestLabel)"])
         runWait("/bin/launchctl", ["bootstrap", domain, plistURL.path])
 
+        // The system prompt often does not appear for a command-line binary,
+        // so always take the user to the setting and show the binary to add.
+        openInputMonitoring()
+        NSWorkspace.shared.activateFileViewerSelecting([currentBinary()])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            self.alert("Allow kmonad in Input Monitoring",
+                       "In System Settings → Privacy & Security → Input Monitoring, click + and add "
+                       + "\(self.currentBinary().lastPathComponent) (selected in the Finder window — you can drag it "
+                       + "into the list), then turn it on. If an older kmonad entry is listed, remove it first. "
+                       + "KMonad restarts the keyboards by itself.")
+        }
+
         // Once the user has decided, clean up and restart the keyboards.
         var tries = 0
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] t in
@@ -490,7 +504,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             tries += 1
             let running = self.runWait("/bin/launchctl", ["print", "\(domain)/\(self.requestLabel)"])
                 .contains("state = running")
-            if !running || tries > 100 {
+            // pick up the grant quickly, but never restart a working kmonad
+            if tries % 5 == 0,
+               readStatus()?.keyboards.contains(where: { $0.state == "needs-permission" }) == true {
+                self.touch(self.reloadURL)
+            }
+            if (!running && tries > 40) || tries > 100 {
                 t.invalidate()
                 self.runWait("/bin/launchctl", ["bootout", "\(domain)/\(self.requestLabel)"])
                 try? FileManager.default.removeItem(at: plistURL)

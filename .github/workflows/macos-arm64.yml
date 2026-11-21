@@ -205,6 +205,10 @@ jobs:
           sudo installer -pkg "$PKG" -target /
           sleep 8
           sudo launchctl print system/io.github.zikisoy.kmonad.supervisor | grep -E "state|pid"
+          # re-install over a running copy: the service must come back up
+          sudo installer -pkg "$PKG" -target /
+          sleep 5
+          sudo launchctl print system/io.github.zikisoy.kmonad.supervisor | grep -E "state = running"
           cat "/Library/Application Support/KMonad/status.json"
           python3 -c "import json;d=json.load(open('/Library/Application Support/KMonad/status.json'));print('vhid:',d['vhid'])"
           ls -l /usr/local/bin/kmonad

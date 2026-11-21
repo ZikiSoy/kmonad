@@ -38,6 +38,7 @@ fi
 
 # Boot-time supervisor (runs the keyboards, restarts them on errors)
 install -o root -g wheel -m 644 "$APP/Contents/Resources/$LABEL.plist" "/Library/LaunchDaemons/$LABEL.plist"
+launchctl enable "system/$LABEL" 2>/dev/null || true
 for i in 1 2 3 4 5 6 7 8 9 10; do
   launchctl print "system/$LABEL" >/dev/null 2>&1 && { launchctl kickstart -k "system/$LABEL"; break; }
   launchctl bootstrap system "/Library/LaunchDaemons/$LABEL.plist" 2>/dev/null && break
