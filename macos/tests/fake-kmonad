@@ -1,0 +1,17 @@
+#!/bin/bash
+# Stand-in for kmonad in the daemon integration test. Behaviour comes from
+# markers in the config: BAD (parse error), NOPERM, CRASH, NOVHID, CMD.
+if [ "$1" = -d ]; then
+  grep -q BAD "$2" && { echo "Parse error at 3:1: unexpected BAD"; exit 1; }
+  exit 0
+fi
+cfg="$1"
+echo "connected"
+echo "driver_connected 1"
+if grep -q NOPERM "$cfg"; then echo "IOHIDDeviceOpen error: (iokit/common) not permitted"; fi
+if grep -q CRASH "$cfg"; then sleep 0.3; echo "kmonad: crashed"; exit 1; fi
+if grep -q NOVHID "$cfg"; then echo "connect_failed asio.system:2"; echo "You may need to start Karabiner"; fi
+if grep -q CMD "$cfg"; then "$KMONAD_CMD_WRAPPER" "touch '$(dirname "$cfg")/../../cmd-ran'"; fi
+trap 'kill $! 2>/dev/null; exit 0' TERM INT
+sleep 100000 &
+wait

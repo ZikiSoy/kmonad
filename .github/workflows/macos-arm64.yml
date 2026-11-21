@@ -1,21 +1,14 @@
 name: macOS Apple Silicon build
 
-# Builds kmonad for Apple Silicon Macs (M1 and later) against the
-# Karabiner DriverKit VirtualHIDDevice (dext).
-#
-# The dext client is compiled into kmonad and its IPC protocol must match the
-# installed VirtualHIDDevice daemon, so one binary is built per protocol:
+# KMonad for Mac (design v2): builds kmonad for each Karabiner
+# VirtualHIDDevice client protocol, the KMonad.app (menu bar + root daemon),
+# tests it, signs it with the fixed self-signed certificate from the
+# MACOS_SIGN_P12 / MACOS_SIGN_P12_PASSWORD secrets (ad hoc without them) and
+# packs KMonad-<version>.pkg.
 #
 #   VirtualHIDDevice 6.x -> client protocol 5 -> kmonad-p5
 #   VirtualHIDDevice 7.x -> client protocol 6 -> kmonad-p6
 #   VirtualHIDDevice 8.x -> client protocol 7 -> kmonad-p7
-#
-# The bundle also ships `kmonad`, a launcher that reads the installed
-# VirtualHIDDevice version and execs the matching binary.
-# The `app` job packs everything into KMonad.app (menu bar app + root
-# supervisor LaunchDaemon) and a KMonad-<version>.pkg installer, then
-# installs/uninstalls it on the runner as a smoke test.
-# Pushing a tag like v0.4.x-mac also publishes the .pkg as a GitHub release.
 
 on:
   push:
@@ -126,64 +119,94 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.4.5-zk.${GITHUB_RUN_NUMBER}"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: Build menu bar app
+      - name: Unit tests
+        run: swift test --package-path macos/KMonad
+
+      - name: Build KMonad
+        id: swift
+        shell: bash
+        run: |
+          swift build -c release --arch arm64 --package-path macos/KMonad
+          echo "bin=$(swift build -c release --arch arm64 --package-path macos/KMonad --show-bin-path)" >> "$GITHUB_OUTPUT"
+
+      - name: Daemon integration test
+        shell: bash
+        timeout-minutes: 10
+        run: macos/tests/daemon-test.sh "${{ steps.swift.outputs.bin }}/KMonad" macos/pkg/kmonad-cmd
+
+      - name: Assemble KMonad.app
         shell: bash
         run: |
           A=build/KMonad.app/Contents
-          mkdir -p "$A/MacOS" "$A/Resources/bin/shims"
-          swiftc -O -target arm64-apple-macos13.0 -parse-as-library \
-            ci/macos/app/KMonadMenu.swift -o "$A/MacOS/KMonad"
-          python3 ci/macos/app/extract-k.py kmonad.svg "$A/Resources/K.svg"
-          if ! swift ci/macos/app/make-icon.swift "$A/Resources/K.svg" build/AppIcon.iconset; then
-            # NSImage could not read the SVG: rasterise the same SVG instead
+          mkdir -p "$A/MacOS" "$A/Resources/bin"
+          cp "${{ steps.swift.outputs.bin }}/KMonad" "$A/MacOS/KMonad"
+          sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
+            macos/app/Info.plist > "$A/Info.plist"
+          cp kbin/kmonad-p* "$A/Resources/bin/"
+          cp macos/pkg/kmonad-cmd "$A/Resources/bin/"
+          cp macos/app/template.kbd macos/pkg/uninstall.sh macos/pkg/io.github.zikisoy.kmonad.daemon.plist "$A/Resources/"
+          python3 macos/tools/extract-k.py kmonad.svg "$A/Resources/K.svg"
+          if ! swift macos/tools/make-icon.swift "$A/Resources/K.svg" build/AppIcon.iconset; then
             brew install librsvg
             rsvg-convert -h 1024 "$A/Resources/K.svg" -o build/K.png
-            swift ci/macos/app/make-icon.swift build/K.png build/AppIcon.iconset
+            swift macos/tools/make-icon.swift build/K.png build/AppIcon.iconset
           fi
           iconutil -c icns build/AppIcon.iconset -o "$A/Resources/AppIcon.icns"
-          sed -e "s/__VERSION__/${{ steps.v.outputs.version }}/" -e "s/__BUILD__/${GITHUB_RUN_NUMBER}/" \
-            ci/macos/app/Info.plist > "$A/Info.plist"
-          cp kbin/kmonad-p* "$A/Resources/bin/"
-          cp ci/macos/kmonad-launcher.sh "$A/Resources/bin/kmonad"
-          cp ci/macos/app/kmonad-supervisor "$A/Resources/bin/"
-          cp ci/macos/app/shims/open "$A/Resources/bin/shims/"
-          cp ci/macos/app/template.kbd ci/macos/app/uninstall.sh \
-             ci/macos/app/io.github.zikisoy.kmonad.supervisor.plist "$A/Resources/"
-          mkdir -p "$A/Library/LaunchDaemons"
-          cp ci/macos/app/io.github.zikisoy.kmonad.daemon.plist "$A/Library/LaunchDaemons/"
-          chmod 755 "$A/MacOS/KMonad" "$A/Resources/bin/"* "$A/Resources/bin/shims/open" "$A/Resources/uninstall.sh"
+          chmod 755 "$A/MacOS/KMonad" "$A/Resources/bin/"* "$A/Resources/uninstall.sh"
 
       - name: Fetch Karabiner VirtualHIDDevice ${{ env.VHID_VERSION }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p pkgscripts
-          cp ci/macos/app/pkg-scripts/* pkgscripts/
           URL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice/releases/tags/$VHID_VERSION" \
             | jq -r '.assets[] | select(.name | endswith(".pkg")) | .browser_download_url' | head -1)
           echo "$URL"
-          curl -fsSL -o pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg "$URL"
-          pkgutil --check-signature pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg | tee sig.txt
+          P=build/KMonad.app/Contents/Resources/Karabiner-DriverKit-VirtualHIDDevice.pkg
+          curl -fsSL -o "$P" "$URL"
+          pkgutil --check-signature "$P" | tee sig.txt
           grep -q "G43BCU2T37" sig.txt   # pqrs.org Developer ID
-          # also inside the app, for drag-to-Applications installs
-          cp pkgscripts/Karabiner-DriverKit-VirtualHIDDevice.pkg build/KMonad.app/Contents/Resources/
 
-      - name: Sign app (ad hoc)
+      - name: Sign
         shell: bash
+        env:
+          P12: ${{ secrets.MACOS_SIGN_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
         run: |
-          codesign --force --deep --sign - build/KMonad.app
-          codesign --verify --deep --verbose=2 build/KMonad.app
-          find build/KMonad.app -type f | sort
+          APP=build/KMonad.app
+          if [ -z "$P12" ]; then
+            echo "::warning::MACOS_SIGN_P12 not set: ad hoc signature (Input Monitoring must be granted again after updates)"
+            ID=-
+          else
+            KC="$RUNNER_TEMP/kmonad.keychain-db"; KCPW=$(openssl rand -hex 16)
+            security create-keychain -p "$KCPW" "$KC"
+            security set-keychain-settings "$KC"
+            security unlock-keychain -p "$KCPW" "$KC"
+            echo "$P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+            security import "$RUNNER_TEMP/sign.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
+            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+            security find-identity -p codesigning "$KC"
+            ID=$(security find-identity -p codesigning "$KC" | awk '/KMonad Signing/ {print $2; exit}')
+            [ -n "$ID" ] || { echo "signing identity not found"; exit 1; }
+          fi
+          sign() { codesign --force --timestamp=none --sign "$ID" "$@"; }
+          for p in 5 6 7; do sign --identifier io.github.zikisoy.kmonad.p$p "$APP/Contents/Resources/bin/kmonad-p$p"; done
+          sign --identifier io.github.zikisoy.kmonad "$APP/Contents/MacOS/KMonad"
+          sign "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d -r- "$APP"
+          codesign -d -r- "$APP/Contents/Resources/bin/kmonad-p7"
+          find "$APP" -type f | sort
 
       - name: Build installer
         shell: bash
         run: |
           V=${{ steps.v.outputs.version }}
-          pkgbuild --root build --install-location /Applications \
-            --scripts pkgscripts --identifier io.github.zikisoy.kmonad \
-            --version "$V" --component-plist /dev/stdin component.pkg <<'EOF'
+          mkdir -p build/scripts
+          cp macos/pkg/preinstall macos/pkg/postinstall build/scripts/
+          cat > build/component.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><array><dict>
@@ -194,58 +217,32 @@ jobs:
             <key>BundleOverwriteAction</key><string>upgrade</string>
           </dict></array></plist>
           EOF
-          productbuild --package component.pkg "KMonad-$V.pkg"
+          mkdir -p build/root && cp -R build/KMonad.app build/root/
+          pkgbuild --root build/root --install-location /Applications --scripts build/scripts \
+            --identifier io.github.zikisoy.kmonad --version "$V" \
+            --component-plist build/component.plist build/component.pkg
+          productbuild --package build/component.pkg "KMonad-$V.pkg"
           shasum -a 256 "KMonad-$V.pkg" | tee "KMonad-$V.pkg.sha256"
           echo "PKG=KMonad-$V.pkg" >> "$GITHUB_ENV"
 
-      - name: Smoke test - install on this runner
+      - name: Smoke test - install twice, uninstall
         shell: bash
         timeout-minutes: 10
         run: |
-          sudo installer -pkg "$PKG" -target /
-          sleep 8
-          sudo launchctl print system/io.github.zikisoy.kmonad.supervisor | grep -E "state|pid"
-          # re-install over a running copy: the service must come back up
-          sudo installer -pkg "$PKG" -target /
-          sleep 5
-          sudo launchctl print system/io.github.zikisoy.kmonad.supervisor | grep -E "state = running"
-          cat "/Library/Application Support/KMonad/status.json"
-          python3 -c "import json;d=json.load(open('/Library/Application Support/KMonad/status.json'));print('vhid:',d['vhid'])"
-          ls -l /usr/local/bin/kmonad
-          /usr/local/bin/kmonad -d /Applications/KMonad.app/Contents/Resources/template.kbd && echo "template parses"
-          KMONAD_REQUEST_ACCESS_ONLY=1 perl -e "alarm 20; exec @ARGV" /usr/local/bin/kmonad /Applications/KMonad.app/Contents/Resources/template.kbd; echo "request-access mode exit=$?"
-          pgrep -lf KMonad.app || echo "(menu app not started: no GUI session on CI)"
-          cat /Library/Logs/KMonad/supervisor.log
+          L=io.github.zikisoy.kmonad.daemon
+          for i in 1 2; do
+            sudo installer -pkg "$PKG" -target /
+            sleep 6
+            sudo launchctl print system/$L | grep -E "state = running"
+          done
+          /Applications/KMonad.app/Contents/MacOS/KMonad --status
+          ls -l /Library/Logs/KMonad
+          sudo cat /Library/Logs/KMonad/daemon.log | tail -20
           sudo /Applications/KMonad.app/Contents/Resources/uninstall.sh
-          test ! -e /Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist
-
-      - name: Build disk image (drag to Applications)
-        shell: bash
-        run: |
-          V=${{ steps.v.outputs.version }}
-          mkdir -p dmgroot
-          cp -R build/KMonad.app dmgroot/
-          ln -s /Applications dmgroot/Applications
-          hdiutil create -volname "KMonad" -srcfolder dmgroot -ov -format UDZO "KMonad-$V.dmg"
-          shasum -a 256 "KMonad-$V.dmg" | tee "KMonad-$V.dmg.sha256"
-          echo "DMG=KMonad-$V.dmg" >> "$GITHUB_ENV"
-
-      - name: Smoke test - drag install + SMAppService daemon
-        shell: bash
-        timeout-minutes: 10
-        continue-on-error: true   # informational: unsigned daemons may be refused
-        run: |
-          MNT=$(hdiutil attach "$DMG" -nobrowse | awk -F'\t' '/Volumes/ {print $NF}')
-          cp -R "$MNT/KMonad.app" /Applications/
-          hdiutil detach "$MNT"
-          K=/Applications/KMonad.app/Contents/MacOS/KMonad
-          $K --daemon-status
-          $K --register-daemon
-          sleep 8
-          sudo launchctl print system/io.github.zikisoy.kmonad.daemon | grep -E "state|pid|program" || echo "(daemon not loaded)"
-          test -f "/Library/Application Support/KMonad/status.json" && cat "/Library/Application Support/KMonad/status.json"
-          $K --unregister-daemon
-          rm -rf /Applications/KMonad.app
+          sleep 2
+          test ! -e /Library/LaunchDaemons/$L.plist
+          test ! -e /Applications/KMonad.app
+          ! sudo launchctl print system/$L >/dev/null 2>&1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -254,15 +251,3 @@ jobs:
           path: |
             ${{ env.PKG }}
             ${{ env.PKG }}.sha256
-            ${{ env.DMG }}
-            ${{ env.DMG }}.sha256
-
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.PKG }}
-            ${{ env.PKG }}.sha256
-            ${{ env.DMG }}
-            ${{ env.DMG }}.sha256

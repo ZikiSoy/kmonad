@@ -1,0 +1,4 @@
+#!/bin/bash
+trap 'kill $! 2>/dev/null; exit 0' TERM INT
+sleep 100000 &
+wait

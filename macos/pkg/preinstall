@@ -1,0 +1,21 @@
+#!/bin/bash
+# Stop KMonad (this and earlier designs) and wait until launchd has really
+# unloaded it: bootstrapping again too early fails with "Bootstrap failed: 5".
+for l in io.github.zikisoy.kmonad.daemon io.github.zikisoy.kmonad.supervisor \
+         local.kmonad.macbook org.pqrs.Karabiner-VirtualHIDDevice-Daemon.kmonad; do
+  if launchctl print "system/$l" >/dev/null 2>&1; then
+    launchctl bootout "system/$l" 2>/dev/null || true
+    for _ in $(seq 1 20); do launchctl print "system/$l" >/dev/null 2>&1 || break; sleep 0.5; done
+  fi
+done
+rm -f /Library/LaunchDaemons/io.github.zikisoy.kmonad.supervisor.plist \
+      /Library/LaunchDaemons/local.kmonad.macbook.plist \
+      /Library/LaunchDaemons/org.pqrs.Karabiner-VirtualHIDDevice-Daemon.kmonad.plist
+if [ "$(readlink /usr/local/bin/kmonad 2>/dev/null)" = /Applications/KMonad.app/Contents/Resources/bin/kmonad ]; then
+  rm -f /usr/local/bin/kmonad
+fi
+rm -rf "/Library/Application Support/KMonad/run"
+rm -f "/Library/Application Support/KMonad/status.json"
+pkill -f '/Applications/KMonad.app/Contents/Resources/bin/kmonad-p' 2>/dev/null || true
+pkill -x KMonad 2>/dev/null || true
+exit 0

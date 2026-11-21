@@ -1,0 +1,56 @@
+#!/bin/bash
+set -u
+APP=/Applications/KMonad.app
+LABEL=io.github.zikisoy.kmonad.daemon
+PLIST=/Library/LaunchDaemons/$LABEL.plist
+STATE="/Library/Application Support/KMonad"
+LOGS=/Library/Logs/KMonad
+MANAGER=/Applications/.Karabiner-VirtualHIDDevice-Manager.app
+USER_NAME=$(stat -f %Su /dev/console)
+USER_ID=$(id -u "$USER_NAME" 2>/dev/null || echo "")
+has_user() { [ -n "$USER_ID" ] && [ "$USER_NAME" != root ] && [ "$USER_NAME" != loginwindow ]; }
+
+mkdir -p "$STATE" "$LOGS"
+chmod 755 "$STATE" "$LOGS"
+
+# 1. Karabiner VirtualHIDDevice driver: only when missing, never replace one
+#    (Karabiner-Elements brings its own).
+if [ ! -d "$MANAGER" ] && [ -f "$APP/Contents/Resources/Karabiner-DriverKit-VirtualHIDDevice.pkg" ]; then
+  if installer -pkg "$APP/Contents/Resources/Karabiner-DriverKit-VirtualHIDDevice.pkg" -target /; then
+    touch "$STATE/installed-driver"
+    if has_user; then
+      # waits for the user's approval in System Settings: don't block the install
+      ( launchctl asuser "$USER_ID" "$MANAGER/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager" activate \
+          >"$LOGS/driver-activate.log" 2>&1 & )
+    fi
+  fi
+fi
+
+# 2. The user's config folder.
+if has_user; then
+  HOME_DIR=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')
+  sudo -u "$USER_NAME" mkdir -p "$HOME_DIR/.config/kmonad"
+  if [ ! -f "$HOME_DIR/.config/kmonad/enabled" ]; then
+    printf '# KMonad: enabled configs, one file name per line\n' | sudo -u "$USER_NAME" tee "$HOME_DIR/.config/kmonad/enabled" >/dev/null
+  fi
+fi
+
+# 3. The daemon.
+install -o root -g wheel -m 644 "$APP/Contents/Resources/$LABEL.plist" "$PLIST"
+launchctl enable "system/$LABEL" 2>/dev/null || true
+ok=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if launchctl print "system/$LABEL" >/dev/null 2>&1; then
+    launchctl kickstart -k "system/$LABEL" 2>/dev/null
+    ok=1; break
+  fi
+  if launchctl bootstrap system "$PLIST" 2>/dev/null; then ok=1; break; fi
+  sleep 1
+done
+[ "$ok" = 1 ] || echo "KMonad: could not start $LABEL" >&2
+
+# 4. The menu, for the logged-in user.
+if has_user; then
+  ( launchctl asuser "$USER_ID" sudo -u "$USER_NAME" /usr/bin/open -g "$APP" >/dev/null 2>&1 & )
+fi
+exit 0

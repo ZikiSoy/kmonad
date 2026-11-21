@@ -1,7 +1,6 @@
 #include <IOKit/hid/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDShared.h>
 #include <unistd.h>
-#include <cstdlib>
 #include <errno.h>
 #include <thread>
 #include <map>
@@ -222,24 +221,6 @@ void monitor_kb(char *product) {
  * back to the OS.
  */
 extern "C" int grab_kb(char *product) {
-    // Input Monitoring: if not granted yet, ask macOS for it. The system
-    // prompt only appears when kmonad runs as its own process in the user's
-    // GUI session (the KMonad menu starts it like that with
-    // KMONAD_REQUEST_ACCESS_ONLY=1); as a root daemon this just fails quietly.
-    if (__builtin_available(macOS 10.15, *)) {
-        bool only = getenv("KMONAD_REQUEST_ACCESS_ONLY") != NULL;
-        if (IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted) {
-            bool ok = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
-            std::cerr << "Input Monitoring: "
-                      << (ok ? "granted" : "not granted - allow kmonad in System Settings > "
-                                           "Privacy & Security > Input Monitoring")
-                      << std::endl;
-            if (only) exit(ok ? 0 : 1);
-        } else if (only) {
-            std::cerr << "Input Monitoring: granted" << std::endl;
-            exit(0);
-        }
-    }
     // Source
     if (pipe(fd) == -1) {
         std::cerr << "pipe error: " << errno << std::endl;

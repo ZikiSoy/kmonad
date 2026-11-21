@@ -1,0 +1,13 @@
+#!/bin/sh
+# kmonad-cmd: runs one kmonad cmd-button command as the logged-in user, in
+# their desktop session. kmonad (root) calls it via KMONAD_CMD_WRAPPER:
+#   kmonad-cmd "<command>"     with KMONAD_CMD_UID=<uid of the user>
+cmd="$1"
+uid="${KMONAD_CMD_UID:-}"
+if [ "$(id -u)" = 0 ]; then
+  case "$uid" in
+    ''|0|*[!0-9]*) echo "kmonad-cmd: refusing to run a command as root" >&2; exit 1 ;;
+  esac
+  exec /bin/launchctl asuser "$uid" /usr/bin/sudo -n -H -u "#$uid" /bin/sh -c "$cmd"
+fi
+exec /bin/sh -c "$cmd"

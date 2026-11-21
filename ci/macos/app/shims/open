@@ -1,9 +1,0 @@
-#!/bin/bash
-# `open` shim for kmonad's cmd-button. kmonad runs as root from a
-# LaunchDaemon, where /usr/bin/open cannot reach the user's desktop.
-# Run it in the logged-in user's GUI session instead.
-U=$(stat -f %Su /dev/console 2>/dev/null)
-if [ "$(id -u)" -eq 0 ] && [ -n "$U" ] && [ "$U" != root ] && [ "$U" != loginwindow ]; then
-  exec launchctl asuser "$(id -u "$U")" sudo -u "$U" /usr/bin/open "$@"
-fi
-exec /usr/bin/open "$@"

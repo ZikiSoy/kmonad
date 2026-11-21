@@ -1,8 +1,7 @@
-;; KMonad config for one keyboard.
-;; 1. Set iokit-name to your keyboard's product name. List them with:
-;;      ioreg -r -c IOHIDKeyboard | grep '"Product"'
-;;    (MacBook built-in keyboard: "Apple Internal Keyboard / Trackpad")
-;; 2. Enable this file in the KMonad menu bar icon. Saving reloads it.
+;; KMonad config for one keyboard (iokit-name below).
+;; Enable it in the KMonad menu bar menu; every save reloads it, and a config
+;; with an error is not loaded (the previous one keeps running).
+;; cmd-button commands run as you, e.g. (cmd-button "open -a Safari").
 ;; Docs: https://github.com/kmonad/kmonad/blob/master/keymap/tutorial.kbd
 
 (defcfg

@@ -11,7 +11,8 @@ where
 
 import KMonad.Prelude
 
-import UnliftIO.Process (CreateProcess(close_fds), createProcess_, shell)
+import UnliftIO.Process (CreateProcess(close_fds), createProcess_, shell, proc)
+import qualified System.Environment as Env
 
 import KMonad.Keyboard
 import KMonad.Keyboard.IO
@@ -144,9 +145,17 @@ instance (HasAppEnv e, HasAppCfg e, HasLogFunc e) => MonadKIO (RIO e) where
       logInfo $ "Received but not running: " <> display t
    where
     spawnCommand :: MonadIO m => String -> m ()
-    spawnCommand cmd = void $ createProcess_ "spawnCommand"
-      (shell cmd){ -- We don't want the child process to inherit things like
-                   -- our keyboard grab (this would, for example, make it
-                   -- impossible for a command to restart KMonad).
-                   close_fds   = True
-                 }
+    spawnCommand cmd = do
+      -- KMONAD_CMD_WRAPPER=/path/to/program runs every command as
+      -- `program "<command>"` instead of `sh -c "<command>"`, e.g. to drop
+      -- root privileges back to the logged-in user (used by KMonad.app).
+      wrapper <- liftIO $ Env.lookupEnv "KMONAD_CMD_WRAPPER"
+      let cp = case wrapper of
+            Just w | not (null w) -> proc w [cmd]
+            _                     -> shell cmd
+      void $ createProcess_ "spawnCommand"
+        cp{ -- We don't want the child process to inherit things like
+            -- our keyboard grab (this would, for example, make it
+            -- impossible for a command to restart KMonad).
+            close_fds   = True
+          }
